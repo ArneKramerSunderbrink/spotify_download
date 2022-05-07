@@ -1,0 +1,9 @@
+.cache
+.ipynb_checkpoints/
+.~lock.*
+Untitled.ipynb
+__pycache__/
+config.json
+test.csv
+venv/
+
