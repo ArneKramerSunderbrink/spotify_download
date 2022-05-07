@@ -1,0 +1,5 @@
+spotipy
+pandas
+jupyter
+notebook
+matplotlib
