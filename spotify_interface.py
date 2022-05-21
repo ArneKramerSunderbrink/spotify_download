@@ -3,9 +3,25 @@ import spotipy
 import pandas as pd
 from spotipy.oauth2 import SpotifyClientCredentials
 from requests.exceptions import Timeout
+from collections.abc import Iterator
+from tqdm import tqdm
 
 
 class SpotifyInterface:
+    TRACK_COLUMNS_BASIC = [
+        'added_at', 'uri', 'url', 'name', 'artist', 'album', 'album_date', 'duration', 'popularity'
+    ]
+    TRACK_COLUMNS = TRACK_COLUMNS_BASIC + [
+        'analysis_tempo', 'analysis_tempo_confidence',
+        'analysis_time_signature', 'analysis_time_signature_confidence',
+        'analysis_key', 'analysis_key_confidence',
+        'analysis_mode', 'analysis_mode_confidence',
+        'features_danceability', 'features_energy',
+        'features_speechiness', 'features_acousticness',
+        'features_instrumentalness', 'features_liveness', 'features_loudness',
+        'features_valence'
+    ]
+
     def __init__(self, config_path='config.json'):
         
         with open(config_path, 'rb') as f:
@@ -43,7 +59,6 @@ class SpotifyInterface:
         
         info['url'] = track['track']['external_urls']['spotify']
         info['uri'] = track['track']['uri']
-        print(info['name'], info['uri'])  # TODO debugging
         
         info['duration'] = track['track']['duration_ms']
         
@@ -82,7 +97,7 @@ class SpotifyInterface:
                 features = self.sp.audio_features(info['uri'])[0]
                 # see https://developer.spotify.com/documentation/web-api/reference/#/operations/get-several-audio-features
             except Timeout:
-                print('timeout analysis')
+                print('Timeout @ requesting analysis for Track: {} - {}'.format(info['artist'], info['name']))
                 info['analysis_tempo'] = ''
                 info['analysis_tempo_confidence'] = ''
                 info['analysis_time_signature'] = ''
@@ -131,7 +146,7 @@ class SpotifyInterface:
                 # valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more
                 # negative (e.g. sad, depressed, angry).
             except Timeout:
-                print('timeout features')
+                print('Timeout @ requesting features for Track: {} - {}'.format(info['artist'], info['name']))
                 info['features_energy'] = ''
                 info['features_speechiness'] = ''
                 info['features_acousticness'] = ''
@@ -142,26 +157,34 @@ class SpotifyInterface:
         
         return info
 
-    def get_df_from_playlist(self, playlist_uri: str, include_analysis=True) -> pd.DataFrame:
-        # TODO columns sinnvoll sortieren?
-        # TODO mit tqdm fortschritt anzeigen
+    def get_df_from_playlist(self, playlist_uri: str, include_analysis=True, verbose=True) -> pd.DataFrame:
+        track_iterator = self.get_tracks_from_playlist(playlist_uri)
+        if verbose:
+            playlist_name = self.sp.playlist(playlist_uri, fields=['name'])['name']
+            track_iterator = tqdm(
+                track_iterator,
+                unit=' tracks',
+                desc='Retrieving tracks from playlist {}'.format(playlist_name)
+            )
+
         return pd.DataFrame.from_records(
-            self.get_info_from_track(track, include_analysis)
-            for track in self.get_tracks_from_playlist(playlist_uri)
+            (
+                self.get_info_from_track(track, include_analysis)
+                for track in track_iterator
+            ),
+            columns=self.TRACK_COLUMNS if include_analysis else self.TRACK_COLUMNS_BASIC
         )
     
-    # TODO see if I can reorder playlists by tempo using so.playlist_reorder_items
+    # TODO see if I can reorder playlists by tempo using sp.playlist_reorder_items
 
     @staticmethod
-    def _get_all_items(getter_function, uri) -> list:
-        # TODO besser generator zurückgeben statt list
-        items = []
+    def _get_all_items(getter_function, uri) -> Iterator:
         offset = 0
         while True:
             response = getter_function(uri, offset=offset)
             new_items = response['items']
-            items += new_items
+            for item in new_items:
+                yield item
             offset += response['limit']
             if response['next'] is None:
                 break
-        return items
