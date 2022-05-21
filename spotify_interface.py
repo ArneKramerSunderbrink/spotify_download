@@ -5,9 +5,11 @@ from spotipy.oauth2 import SpotifyClientCredentials
 from requests.exceptions import Timeout
 from collections.abc import Iterator
 from tqdm import tqdm
+from typing import Union
 
 
 class SpotifyInterface:
+    PLAYLIST_COLUMNS = ['name', 'description', 'uri', 'url', 'owner_name', 'owner_uri']
     TRACK_COLUMNS_BASIC = [
         'added_at', 'uri', 'url', 'name', 'artist', 'album', 'album_date', 'duration', 'popularity'
     ]
@@ -39,15 +41,81 @@ class SpotifyInterface:
         
         self.user_id = config['user']
 
-    def get_playlists_from_user(self, user_id: str = None) -> [dict]:
-        if user_id is None:
-            user_id = self.user_id
+    def get_user_id_from_user(self, user: Union[str, dict] = None) -> str:
+        """
+        user: id, uri, or dict as returned by self.sp.user(id)
+        """
+        if user is None:
+            return self.user_id
+        elif type(user) == dict:
+            return user['id']
+        elif user.startswith('spotify:user:'):
+            return user[len('spotify:user:'):]
+        else:
+            raise ValueError('Provide user as uri, id, or dict')
+
+    def get_playlist_uri_from_playlist(self, playlist: Union[str, dict]) -> str:
+        """
+        playlist: id, uri, or dict as returned by self.sp.playlist(uri)
+        """
+        if type(playlist) == dict:
+            return playlist['uri']
+        elif playlist.startswith('spotify:playlist:'):
+            return playlist
+        else:
+            return 'spotify:playlist:' + playlist
+
+    def get_playlist_from_playlist(self, playlist: Union[str, dict]) -> dict:
+        """
+        playlist: id, uri, or dict as returned by self.sp.playlist(uri)
+        """
+        if type(playlist) == dict:
+            return playlist
+        else:
+            return self.sp.playlist(playlist)
+
+    def get_track_from_track(self, track: Union[str, dict]) -> dict:
+        """
+        track: id, uri, or dict as returned by self.sp.track(uri)
+        """
+        if type(track) == dict:
+            return track
+        else:
+            return self.sp.track(track)
+
+    def get_playlists_from_user(self, user: Union[str, dict] = None) -> [dict]:
+        """
+        user: id, uri, or dict as returned by self.sp.user(id)
+        """
+        user_id = self.get_user_id_from_user(user)
         return self._get_all_items(self.sp.user_playlists, user_id)
 
-    def get_tracks_from_playlist(self, playlist_uri: str) -> [dict]:
+    def get_tracks_from_playlist(self, playlist: Union[str, dict]) -> [dict]:
+        """
+        playlist: id, uri, or dict as returned by self.sp.playlist(uri)
+        """
+        playlist_uri = self.get_playlist_uri_from_playlist(playlist)
         return self._get_all_items(self.sp.playlist_items, playlist_uri)
 
-    def get_info_from_track(self, track: dict, include_analysis=True) -> dict[str, str]:
+    def get_info_from_playlist(self, playlist: Union[str, dict]) -> dict[str, str]:
+        playlist = self.get_playlist_from_playlist(playlist)
+
+        info = dict()
+        info['name'] = playlist['name']
+        info['description'] = playlist['description']
+        info['uri'] = playlist['uri']
+        info['url'] = playlist['external_urls']['spotify']
+        info['owner_name'] = playlist['owner']['display_name']
+        info['owner_uri'] = playlist['owner']['uri']
+
+        return info
+
+    def get_info_from_track(self, track: Union[str, dict], include_analysis=True) -> dict[str, str]:
+        """
+        track: id, uri, or dict as returned by self.sp.track(uri)
+        """
+        track = self.get_track_from_track(track)
+
         info = dict()
         info['name'] = track['track']['name']
         info['artist'] = repr(tuple(a['name'] for a in track['track']['artists']))
@@ -93,9 +161,7 @@ class SpotifyInterface:
                 # is derived. Major is represented by 1 and minor is 0.
                 info['analysis_mode'] = analysis['track']['mode']
                 info['analysis_mode_confidence'] = analysis['track']['mode_confidence']
-                
-                features = self.sp.audio_features(info['uri'])[0]
-                # see https://developer.spotify.com/documentation/web-api/reference/#/operations/get-several-audio-features
+
             except Timeout:
                 print('Timeout @ requesting analysis for Track: {} - {}'.format(info['artist'], info['name']))
                 info['analysis_tempo'] = ''
@@ -108,8 +174,10 @@ class SpotifyInterface:
                 info['analysis_mode_confidence'] = ''
                 
             try:
+                features = self.sp.audio_features(info['uri'])[0]
+                # see https://developer.spotify.com/documentation/web-api/reference/#/operations/get-several-audio-features
+
                 info['features_danceability'] = features['danceability']
-            
                 # Danceability describes how suitable a track is for dancing based on a combination of musical elements
                 # including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least
                 # danceable and 1.0 is most danceable.
@@ -157,10 +225,13 @@ class SpotifyInterface:
         
         return info
 
-    def get_df_from_playlist(self, playlist_uri: str, include_analysis=True, verbose=True) -> pd.DataFrame:
-        track_iterator = self.get_tracks_from_playlist(playlist_uri)
+    def get_df_from_playlist(self, playlist: Union[str, dict], include_analysis=True, verbose=True) -> pd.DataFrame:
+        """
+        playlist: id, uri, or dict as returned by self.sp.playlist(uri)
+        """
+        track_iterator = self.get_tracks_from_playlist(playlist)
         if verbose:
-            playlist_name = self.sp.playlist(playlist_uri, fields=['name'])['name']
+            playlist_name = self.get_info_from_playlist(playlist)['name']
             track_iterator = tqdm(
                 track_iterator,
                 unit=' tracks',
