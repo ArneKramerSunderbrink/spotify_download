@@ -15,7 +15,7 @@ playlist_data = []
 for playlist in si.get_playlists_from_user():
     playlist_data.append(si.get_info_from_playlist(playlist))
     
-    df = si.get_df_from_playlist(playlist, include_analysis=False, verbose=True)
+    df = si.get_df_from_playlist(playlist, include_audio_features=False, verbose=True)
     
     df.to_csv('{}/{}_{}.csv'.format(DIRECTORY, playlist['name'], now), index=False)
 
