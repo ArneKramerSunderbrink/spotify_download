@@ -1,14 +1,15 @@
 import json
-import spotipy
+import logging
 import pandas as pd
 
+from spotipy import SpotifyException, Spotify
 from spotipy.oauth2 import SpotifyClientCredentials
 
 from math import ceil
 from tqdm import tqdm
 
 from collections.abc import Iterator, Iterable
-from typing import Union
+from typing import Union, Optional
 
 
 class SpotifyInterface:
@@ -92,7 +93,7 @@ class SpotifyInterface:
             client_secret=config['secret']
         )
         
-        self.sp = spotipy.Spotify(
+        self.sp = Spotify(
             client_credentials_manager=client_credentials_manager,
             requests_timeout=config['requests_timeout']
         )
@@ -110,7 +111,7 @@ class SpotifyInterface:
         elif user.startswith('spotify:user:'):
             return user[len('spotify:user:'):]
         else:
-            raise ValueError('Provide user as uri, id, or dict')
+            return user
 
     @staticmethod
     def get_playlist_uri_from_playlist(playlist: Union[str, dict]) -> str:
@@ -124,14 +125,18 @@ class SpotifyInterface:
         else:
             return 'spotify:playlist:' + playlist
 
-    def get_playlist_from_playlist(self, playlist: Union[str, dict]) -> dict:
+    def get_playlist_from_playlist(self, playlist: Union[str, dict]) -> Optional[dict]:
         """
         playlist: id, uri, or dict as returned by self.sp.playlist(uri)
         """
         if type(playlist) == dict:
             return playlist
         else:
-            return self.sp.playlist(playlist)
+            try:
+                return self.sp.playlist(playlist)
+            except SpotifyException:
+                logging.warning(f'Could not find playlist for uri {playlist}.')
+                return None
 
     @staticmethod
     def get_track_uri_from_track(track: Union[str, dict]) -> str:
@@ -145,14 +150,18 @@ class SpotifyInterface:
         else:
             return 'spotify:track:' + track
 
-    def get_track_from_track(self, track: Union[str, dict]) -> dict:
+    def get_track_from_track(self, track: Union[str, dict]) -> Optional[dict]:
         """
         track: id, uri, or dict as returned by self.sp.track(uri)
         """
         if type(track) == dict:
             return track
         else:
-            return self.sp.track(track)
+            try:
+                return self.sp.track(track)
+            except SpotifyException:
+                logging.warning(f'Could not find track for uri {track}.')
+                return None
 
     def get_playlists_from_user(self, user: Union[str, dict] = None) -> [dict]:
         """
@@ -173,12 +182,14 @@ class SpotifyInterface:
         playlist: id, uri, or dict as returned by self.sp.playlist(uri)
         """
         playlist = self.get_playlist_from_playlist(playlist)
+        if playlist is None:
+            return {key: None for key in self.PLAYLIST_COLUMNS}
 
         info = dict()
         info['name'] = playlist['name']
         info['description'] = playlist['description']
         info['uri'] = playlist['uri']
-        info['url'] = playlist['external_urls']['spotify']
+        info['url'] = playlist['external_urls'].get('spotify', None)
         info['owner_name'] = playlist['owner']['display_name']
         info['owner_uri'] = playlist['owner']['uri']
 
@@ -203,6 +214,8 @@ class SpotifyInterface:
         track: id, uri, or dict as returned by self.sp.track(uri)
         """
         track = self.get_track_from_track(track)
+        if track is None:
+            return {key: None for key in self.TRACK_COLUMNS}
 
         info = dict()
         info['name'] = track['track']['name']
@@ -213,7 +226,7 @@ class SpotifyInterface:
         info['album'] = track['track']['album']['name']
         info['album_date'] = track['track']['album']['release_date']
         
-        info['url'] = track['track']['external_urls']['spotify']
+        info['url'] = track['track']['external_urls'].get('spotify', None)
         info['uri'] = track['track']['uri']
         
         info['duration'] = track['track']['duration_ms']
@@ -227,7 +240,7 @@ class SpotifyInterface:
         audio_features: Of a single track as returned by self.sp.audio_features(track)[0]
         """
         return {
-            key: audio_features[key]
+            key: audio_features[key] if audio_features is not None else None
             for key in self.TRACK_COLUMNS_AUDIO_FEATURES
         }
 
@@ -252,6 +265,8 @@ class SpotifyInterface:
             ),
             columns=self.TRACK_COLUMNS_BASIC
         )
+
+        df.dropna(subset=['uri'], inplace=True)  # drop rows from invalid URIs
 
         if include_audio_features:
             features_iterator = self.get_audio_features(df['uri'])

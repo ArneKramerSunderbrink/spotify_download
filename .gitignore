@@ -7,6 +7,6 @@ venv/
 
 Untitled.ipynb
 config.json
-test.csv
+*.csv
 test.py
 backup
