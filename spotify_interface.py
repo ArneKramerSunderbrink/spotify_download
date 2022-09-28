@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 
 from spotipy import SpotifyException, Spotify
-from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from math import ceil
 from tqdm import tqdm
@@ -86,19 +86,19 @@ class SpotifyInterface:
     def __init__(self, config_path='config.json'):
         
         with open(config_path, 'rb') as f:
-            config = json.load(f)
+            self.config = json.load(f)
             
         client_credentials_manager = SpotifyClientCredentials(
-            client_id=config['client_id'],
-            client_secret=config['secret']
+            client_id=self.config['client_id'],
+            client_secret=self.config['secret']
         )
         
         self.sp = Spotify(
             client_credentials_manager=client_credentials_manager,
-            requests_timeout=config['requests_timeout']
+            requests_timeout=self.config['requests_timeout']
         )
         
-        self.user_id = config['user']
+        self.user_id = self.config['user']
 
     def get_user_id_from_user(self, user: Union[str, dict] = None) -> str:
         """
@@ -287,8 +287,57 @@ class SpotifyInterface:
             df = pd.concat((df, df_features), axis=1)
 
         return df
-    
-    # TODO see if I can reorder playlists by tempo using sp.playlist_reorder_items
+
+    def authorize(self, scope: str):
+        """
+        Needed to do things only logged-in users can do.
+        scope: Authorization scope, see https://developer.spotify.com/documentation/general/guides/authorization/scopes/
+        """
+        auth_manager = SpotifyOAuth(
+            client_id=self.config['client_id'],
+            client_secret=self.config['secret'],
+            redirect_uri=self.config['redirect_uri'],
+            scope=scope
+        )
+
+        self.sp = Spotify(auth_manager=auth_manager, requests_timeout=self.config['requests_timeout'])
+
+    def reorder_playlist(self, playlist: Union[str, dict], new_order: [int], verbose=True):
+        """
+        playlist: id, uri, or dict as returned by self.sp.playlist(uri)
+        new_order: (reordered) list of the indices 0 to len(list(self.get_tracks_from_playlist(playlist)))
+                   The track at position new_order[i] will be at position i after reordering.
+        """
+        playlist_uri = self.get_playlist_uri_from_playlist(playlist)
+        len_order = len(new_order)
+
+        def reorder_single_track(old_position, new_position):
+            if old_position == new_position:
+                return
+
+            try:
+                self.sp.playlist_reorder_items(playlist_uri, old_position, new_position, range_length=1)
+            except SpotifyException as e:
+                if 'This request requires user authentication' in e.msg or 'Insufficient client scope' in e.msg:
+                    print('Insufficient client scope authorization, trying to authorize...')
+                    self.authorize(scope='playlist-modify-public')
+                    reorder_single_track(old_position, new_position)
+                else:
+                    raise e
+
+        order = list(range(len_order))
+        index_iterator = range(len_order)
+        if verbose:
+            index_iterator = tqdm(
+                index_iterator, total=len_order, unit=' tracks',
+                desc='Reordering playlist'
+            )
+
+        for i in index_iterator:
+            old_index = order.index(new_order[i])
+            if old_index != i:
+                order.insert(i, order.pop(old_index))
+                reorder_single_track(old_index, i)
 
     @staticmethod
     def _get_all_items(getter_function, uri) -> Iterator:

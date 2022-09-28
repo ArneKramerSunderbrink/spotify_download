@@ -5,7 +5,7 @@
 __pycache__/
 venv/
 
-Untitled.ipynb
+Untitled*.ipynb
 config.json
 *.csv
 test.py

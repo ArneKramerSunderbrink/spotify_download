@@ -17,12 +17,17 @@ Config:
 - Make an app
 - Get the client ID and secret
 - Get your username from https://www.spotify.com/de/account
+- If you want the spotify interface to be able to do things only logged-in users can you need to provide a redirect URI 
+  and add that URI to the list of redirect URIs in your spotify dashboard 
+  (https://developer.spotify.com/dashboard/applications, Edit Settings). 
+  Users should be able to revoke authorizations at https://www.spotify.com/de/account/apps/.
 - Make a file `config.json` containing:
     
       {
           "client_id": "*****",
           "secret": "*****",
           "user": "*****",
+          "redirect_uri": "http://localhost:8080",
           "requests_timeout": 120
       }
 
